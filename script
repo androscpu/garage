@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Update System
+sudo apt update && sudo apt upgrade -y
+
+# Install Required Packages
+sudo apt install python3 python3-pip python3-venv postgresql postgresql-contrib nginx -y
+
+# Setup PostgreSQL
+sudo -u postgres psql -c "CREATE DATABASE garage_manager;"
+sudo -u postgres psql -c "CREATE USER garage_user WITH PASSWORD 'securepassword';"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE garage_manager TO garage_user;"
+
+# Setup Django Application
+mkdir /var/www/garage_manager
+cd /var/www/garage_manager
+python3 -m venv env
+source env/bin/activate
+pip install django psycopg2-binary gunicorn
+
+# Clone the Garage Manager App
+git clone <your-repo-url> garage_manager
+cd garage_manager
+pip install -r requirements.txt
+
+# Update Database Configuration
+sed -i "s/'ENGINE': 'django.db.backends.sqlite3'/'ENGINE': 'django.db.backends.postgresql'/g" garage_manager/settings.py
+sed -i "s/'NAME': BASE_DIR / 'db.sqlite3'/'NAME': 'garage_manager'/g" garage_manager/settings.py
+sed -i "s/'USER': ''/'USER': 'garage_user'/g" garage_manager/settings.py
+sed -i "s/'PASSWORD': ''/'PASSWORD': 'securepassword'/g" garage_manager/settings.py
+
+# Migrate and Create Superuser
+python manage.py migrate
+echo "from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'admin@example.com', 'adminpassword')" | python manage.py shell
+
+# Setup Gunicorn
+gunicorn --bind 0.0.0.0:8000 garage_manager.wsgi &
+
+# Setup Nginx
+sudo tee /etc/nginx/sites-available/garage_manager <<EOF
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
+}
+EOF
+sudo ln -s /etc/nginx/sites-available/garage_manager /etc/nginx/sites-enabled/
+sudo systemctl restart nginx
+
+echo "Garage Manager setup complete. Visit the server's IP to access the application."
