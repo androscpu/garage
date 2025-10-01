@@ -1,0 +1,302 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Multi-tenant schema for Cloud Hotel PMS
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  FRONTDESK
+  HOUSEKEEPING
+}
+
+enum ReservationStatus {
+  CREATED
+  CONFIRMED
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+  NO_SHOW
+}
+
+enum RoomStatus {
+  OUT_OF_ORDER
+  AVAILABLE
+  OCCUPIED
+}
+
+enum HousekeepingStatus {
+  DIRTY
+  CLEANING
+  INSPECT
+  CLEAN
+}
+
+enum HousekeepingTaskType {
+  CLEANING
+  INSPECTION
+  LAUNDRY
+  MAINTENANCE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CARD
+  CASH
+  BANK_TRANSFER
+}
+
+model Tenant {
+  id        String  @id @default(uuid())
+  name      String
+  code      String  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  hotels Hotel[]
+  users  User[]
+}
+
+model Hotel {
+  id           String  @id @default(uuid())
+  tenantId     String
+  name         String
+  code         String
+  timezone     String  @default("UTC")
+  currencyCode String  @default("USD")
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  country      String?
+  postalCode   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  rooms        Room[]
+  roomTypes    RoomType[]
+  ratePlans    RatePlan[]
+  reservations Reservation[]
+  housekeeping HousekeepingTask[]
+  payments     Payment[]
+  guests       Guest[]
+  callEvents   CallEvent[]
+  staff        StaffHotel[]
+  primaryUsers User[] @relation("UserPrimaryHotel")
+
+  @@unique([tenantId, code])
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  primaryHotelId String?
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         UserRole @default(FRONTDESK)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  primaryHotel Hotel? @relation("UserPrimaryHotel", fields: [primaryHotelId], references: [id])
+  tasks        HousekeepingTask[] @relation("TaskAssignee")
+
+  hotels StaffHotel[]
+
+  @@unique([tenantId, email])
+}
+
+model StaffHotel {
+  userId  String
+  hotelId String
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, hotelId])
+}
+
+model RoomType {
+  id          String  @id @default(uuid())
+  hotelId     String
+  name        String
+  description String?
+  baseOccupancy Int    @default(2)
+  maxOccupancy  Int    @default(2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  rooms Room[]
+  reservations Reservation[]
+}
+
+model Room {
+  id         String  @id @default(uuid())
+  hotelId    String
+  roomTypeId String
+  roomNumber String
+  floor      String?
+  status     RoomStatus @default(AVAILABLE)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  hotel    Hotel    @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomType RoomType @relation(fields: [roomTypeId], references: [id])
+
+  reservations Reservation[]
+  housekeeping HousekeepingTask[]
+
+  @@unique([hotelId, roomNumber])
+  @@index([hotelId, status])
+}
+
+model RatePlan {
+  id        String  @id @default(uuid())
+  hotelId   String
+  name      String
+  code      String
+  currency  String  @default("USD")
+  isPublic  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@unique([hotelId, code])
+}
+
+model Guest {
+  id        String  @id @default(uuid())
+  hotelId   String
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  reservations ReservationGuest[]
+
+  @@index([hotelId, lastName])
+}
+
+model Reservation {
+  id           String  @id @default(uuid())
+  hotelId      String
+  roomId       String?
+  roomTypeId   String?
+  ratePlanId   String?
+  confirmationCode BigInt @default(autoincrement()) @unique
+  status       ReservationStatus @default(CREATED)
+  checkInDate  DateTime
+  checkOutDate DateTime
+  adults       Int      @default(1)
+  children     Int      @default(0)
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  hotel    Hotel    @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  room     Room?    @relation(fields: [roomId], references: [id])
+  roomType RoomType? @relation(fields: [roomTypeId], references: [id])
+  ratePlan RatePlan? @relation(fields: [ratePlanId], references: [id])
+
+  guests  ReservationGuest[]
+  payments Payment[]
+
+  @@index([hotelId, status])
+  @@index([hotelId, checkInDate, checkOutDate])
+}
+
+model ReservationGuest {
+  id            String  @id @default(uuid())
+  reservationId String
+  guestId       String
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  guest       Guest       @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  @@unique([reservationId, guestId])
+}
+
+model HousekeepingTask {
+  id          String  @id @default(uuid())
+  hotelId     String
+  roomId      String
+  type        HousekeepingTaskType @default(CLEANING)
+  status      HousekeepingStatus   @default(DIRTY)
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  notes       String?
+  assigneeId  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  hotel    Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  room     Room  @relation(fields: [roomId], references: [id])
+  assignee User? @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  @@index([hotelId, status])
+}
+
+model Payment {
+  id            String  @id @default(uuid())
+  hotelId       String
+  reservationId String?
+  amount        Decimal @db.Decimal(20, 2)
+  currencyCode  String  @default("USD")
+  method        PaymentMethod @default(CARD)
+  status        PaymentStatus  @default(PENDING)
+  externalRef   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  hotel       Hotel       @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation(fields: [reservationId], references: [id])
+
+  @@index([hotelId, status])
+}
+
+model CallEvent {
+  id        String   @id @default(uuid())
+  hotelId   String
+  direction String   // inbound | outbound
+  from      String
+  to        String
+  startedAt DateTime
+  endedAt   DateTime?
+  status    String?
+  data      Json?
+  createdAt DateTime @default(now())
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, startedAt])
+}
