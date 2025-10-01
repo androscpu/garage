@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Hotel {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  timeZone  String   @default("UTC")
+  rooms     Room[]
+  ratePlans RatePlan[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Room {
+  id           String         @id @default(cuid())
+  hotelId      String
+  number       String
+  type         String
+  status       String         @default("available")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  hotel        Hotel          @relation(fields: [hotelId], references: [id])
+  reservations Reservation[]
+  tasks        HousekeepingTask[]
+}
+
+model Guest {
+  id           String         @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String         @unique
+  phone        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  reservations Reservation[]
+}
+
+model RatePlan {
+  id        String   @id @default(cuid())
+  hotelId   String
+  name      String
+  currency  String   @default("USD")
+  price     Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  hotel     Hotel    @relation(fields: [hotelId], references: [id])
+  reservations Reservation[]
+}
+
+model Reservation {
+  id         String     @id @default(cuid())
+  roomId     String
+  guestId    String
+  ratePlanId String?
+  checkIn    DateTime
+  checkOut   DateTime
+  status     String     @default("booked")
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  room       Room       @relation(fields: [roomId], references: [id])
+  guest      Guest      @relation(fields: [guestId], references: [id])
+  ratePlan   RatePlan?  @relation(fields: [ratePlanId], references: [id])
+  payments   Payment[]
+}
+
+model HousekeepingTask {
+  id          String   @id @default(cuid())
+  roomId      String
+  assignedTo  String?
+  status      String   @default("pending")
+  notes       String?
+  scheduledAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  room        Room     @relation(fields: [roomId], references: [id])
+}
+
+model Payment {
+  id             String       @id @default(cuid())
+  reservationId  String
+  amount         Decimal      @db.Decimal(10, 2)
+  currency       String       @default("USD")
+  provider       String
+  providerRef    String?
+  status         String       @default("succeeded")
+  createdAt      DateTime     @default(now())
+  reservation    Reservation  @relation(fields: [reservationId], references: [id])
+}
